@@ -25,6 +25,10 @@ nltk.download('averaged_perceptron_tagger')
 client = anthropic.Anthropic(api_key="API KEY HERE")
 login("HF KEY HERE")
 
+
+nltk.download('wordnet')
+nltk.download('averaged_perceptron_tagger')
+
 class AdvancedRAG:
     def __init__(self, 
                  embedding_model_name: str = 'all-MiniLM-L6-v2',
@@ -40,7 +44,6 @@ class AdvancedRAG:
             llm_model: Name of the LLM model to use
             use_llm: Whether to use LLM features
         """
-        
         load_dotenv()
         
         self.embedding_model = SentenceTransformer(embedding_model_name)
@@ -265,7 +268,7 @@ class AdvancedRAG:
         
         self.bm25 = BM25Okapi(self.tokenized_documents)
 
-def generate_answer(query: str, context_harmful: List[str], context_harmless: List[str], retrieve = True) -> str:
+def generate_answer(query: str, context_harmful: List[str], context_harmless: List[str], retrieve = True, model='claude-3-5-sonnet-20240620') -> str:
         """Generate an answer using the LLM."""
         prompt = "" 
 
@@ -278,15 +281,23 @@ def generate_answer(query: str, context_harmful: List[str], context_harmless: Li
         prompt += "\n\nQuestion: " + query
         prompt += "\n\nAnswer:"
         
-        message = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
-            max_tokens=8192,
-            temperature=0.7,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return message.content[0].text.strip()
+        if "claude" in model:
+            message = client.messages.create(
+                model=model,
+                max_tokens=8192,
+                temperature=0.7,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return message.content[0].text.strip()
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(model)
+            model = AutoModel.from_pretrained(model)
+            inputs = tokenizer(prompt, return_tensors="pt")
+            outputs = model(**inputs)
+            return tokenizer.decode(outputs.argmax(-1)[0], skip_special_tokens=True)
+
 
 def generate_answer_donut(query) -> str:
     try:
@@ -343,23 +354,33 @@ def main():
         context_harmful = [doc for doc, _ in results_harmful]
         context_harmless = [doc for doc, _ in results_harmless]
         
-        answer = generate_answer(query, context_harmful, context_harmless, True)
+        answer = generate_answer(query, context_harmful, context_harmless, True, 'claude-3-5-sonnet-20240620')
         print(f"Answer: {answer}\n")
         print("-" * 80)
 
-        answer_norag = generate_answer(query, None, None, False)
+        answer_norag = generate_answer(query, None, None, False, 'claude-3-5-sonnet-20240620')
         print(f"Answer No RAG: {answer_norag}\n")
         print("-" * 80)
 
-        answer_donut = generate_answer_donut(query)
-        print(f"Answer Donut: {answer_donut}\n")
-        print("-" * 80)
+        answer_rag_llama = generate_answer(query, context_harmful, context_harmless, True, 'meta-llama/Meta-Llama-3-8B')
+        print(f"Answer RAG Llama: {answer_rag_llama}\n")
+        print("-" * 80) 
+
+        answer_llama = generate_answer(query, None, None, False, 'meta-llama/Meta-Llama-3-8B')
+        print(f"Answer Llama: {answer_llama}\n")
+        print("-" * 80) 
+
+        #answer_donut = generate_answer_donut(query)
+        #print(f"Answer Donut: {answer_donut}\n")
+        #print("-" * 80)
 
         with open('answers.txt', 'a') as file:
             file.write(f"Query: {query}\n")
             file.write(f"Answer: {answer}\n")
             file.write(f"Answer No RAG: {answer_norag}\n")
-            file.write(f"Answer Donut: {answer_donut}\n")
+            file.write(f"Answer RAG Llama: {answer_rag_llama}\n")
+            file.write(f"Answer Llama: {answer_llama}\n")
+            #file.write(f"Answer Donut: {answer_donut}\n")
             file.write("-" * 80 + "\n")
 
     rag_harmful.save("advanced_rag_state")
